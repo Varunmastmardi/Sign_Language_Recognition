@@ -1,58 +1,95 @@
-from function import *
-from keras.utils import to_categorical
+import cv2
+import numpy as np
+import os
+import mediapipe as mp
+import tkinter as tk
+from tkinter import Label
+from PIL import Image, ImageTk
 from keras.models import model_from_json
-from keras.layers import LSTM, Dense
-from keras.callbacks import TensorBoard
+from keras.preprocessing.sequence import pad_sequences
+
+# Function from the function.py
+def mediapipe_detection(image, model):
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # COLOR CONVERSION BGR 2 RGB
+    image.flags.writeable = False                  # Image is no longer writeable
+    results = model.process(image)                 # Make prediction
+    image.flags.writeable = True                   # Image is now writeable 
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR) # COLOR COVERSION RGB 2 BGR
+    return image, results
+
+def draw_styled_landmarks(image, results):
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp_drawing.draw_landmarks(
+                image,
+                hand_landmarks,
+                mp_hands.HAND_CONNECTIONS,
+                mp_drawing_styles.get_default_hand_landmarks_style(),
+                mp_drawing_styles.get_default_hand_connections_style())
+
+def extract_keypoints(results):
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            rh = np.array([[res.x, res.y, res.z] for res in hand_landmarks.landmark]).flatten() if hand_landmarks else np.zeros(21*3)
+            return np.concatenate([rh])
+    return np.zeros(21*3)
+
+# Loading the trained model
 json_file = open("model.json", "r")
 model_json = json_file.read()
 json_file.close()
 model = model_from_json(model_json)
 model.load_weights("model.h5")
 
+# Setting up MediaPipe
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+mp_hands = mp.solutions.hands
 
-colors = []
-for i in range(0,20):
-    colors.append((245,117,16))
-print(len(colors))
-def prob_viz(res, actions, input_frame, colors,threshold):
-    output_frame = input_frame.copy()
-    for num, prob in enumerate(res):
-        cv2.rectangle(output_frame, (0,60+num*40), (int(prob*100), 90+num*40), colors[num], -1)
-        cv2.putText(output_frame, actions[num], (0, 85+num*40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
-        
-    return output_frame
-
-
-# 1. New detection variables
+actions = np.array(['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'])
 sequence = []
 sentence = []
-accuracy=[]
+accuracy = []
 predictions = []
-threshold = 0.8 
+threshold = 0.8
 
-cap = cv2.VideoCapture(0)
-# cap = cv2.VideoCapture("https://192.168.43.41:8080/video")
-# Set mediapipe model 
-with mp_hands.Hands(
-    model_complexity=0,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5) as hands:
-    while cap.isOpened():
+# Tkinter Setup
+root = tk.Tk()
+root.title("Sign Language Detection")
 
-        # Read feed
+# Label to display the video feed
+video_label = Label(root)
+video_label.pack()
+
+# Label to display the detected sign language
+output_label = Label(root, text="", font=("Helvetica", 24))
+output_label.pack()
+
+# Global variable to control video capture
+cap = None
+
+def start_capture():
+    global cap
+    cap = cv2.VideoCapture(0)
+    detect_sign_language()
+
+def stop_capture():
+    global cap
+    if cap:
+        cap.release()
+    cap = None
+
+def detect_sign_language():
+    global cap, sequence, sentence, accuracy, predictions
+    if cap and cap.isOpened():
         ret, frame = cap.read()
-
-        # Make detections
-        cropframe=frame[40:400,0:300]
-        # print(frame.shape)
-        frame=cv2.rectangle(frame,(0,40),(300,400),255,2)
-        # frame=cv2.putText(frame,"Active Region",(75,25),cv2.FONT_HERSHEY_COMPLEX_SMALL,2,255,2)
-        image, results = mediapipe_detection(cropframe, hands)
-        # print(results)
+        if not ret:
+            return
         
-        # Draw landmarks
-        # draw_styled_landmarks(image, results)
-        # 2. Prediction logic
+        cropframe = frame[40:400, 0:300]
+        frame = cv2.rectangle(frame, (0, 40), (300, 400), 255, 2)
+        image, results = mediapipe_detection(cropframe, mp_hands.Hands(model_complexity=0, min_detection_confidence=0.5, min_tracking_confidence=0.5))
+        
         keypoints = extract_keypoints(results)
         sequence.append(keypoints)
         sequence = sequence[-30:]
@@ -60,40 +97,41 @@ with mp_hands.Hands(
         try: 
             if len(sequence) == 30:
                 res = model.predict(np.expand_dims(sequence, axis=0))[0]
-                print(actions[np.argmax(res)])
                 predictions.append(np.argmax(res))
                 
-                
-            #3. Viz logic
-                if np.unique(predictions[-10:])[0]==np.argmax(res): 
+                if np.unique(predictions[-10:])[0] == np.argmax(res):
                     if res[np.argmax(res)] > threshold: 
                         if len(sentence) > 0: 
                             if actions[np.argmax(res)] != sentence[-1]:
                                 sentence.append(actions[np.argmax(res)])
-                                accuracy.append(str(res[np.argmax(res)]*100))
+                                accuracy.append(str(res[np.argmax(res)] * 100))
                         else:
                             sentence.append(actions[np.argmax(res)])
-                            accuracy.append(str(res[np.argmax(res)]*100)) 
-
+                            accuracy.append(str(res[np.argmax(res)] * 100))
+                        
                 if len(sentence) > 1: 
                     sentence = sentence[-1:]
-                    accuracy=accuracy[-1:]
-
-                # Viz probabilities
-                # frame = prob_viz(res, actions, frame, colors,threshold)
+                    accuracy = accuracy[-1:]
+                
+                output_text = "Output: " + ' '.join(sentence) + ' ' + ''.join(accuracy) + "%"
+                output_label.config(text=output_text)
         except Exception as e:
-            # print(e)
             pass
-            
-        cv2.rectangle(frame, (0,0), (300, 40), (245, 117, 16), -1)
-        cv2.putText(frame,"Output: -"+' '.join(sentence)+''.join(accuracy), (3,30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        
-        # Show to screen
-        cv2.imshow('OpenCV Feed', frame)
 
-        # Break gracefully
-        if cv2.waitKey(10) & 0xFF == ord('q'):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
+        img = Image.fromarray(frame)
+        imgtk = ImageTk.PhotoImage(image=img)
+        video_label.imgtk = imgtk
+        video_label.configure(image=imgtk)
+        video_label.after(10, detect_sign_language)
+    else:
+        video_label.after(10, detect_sign_language)
+
+# Buttons to start and stop the video capture
+start_button = tk.Button(root, text="Start Capture", command=start_capture)
+start_button.pack(side=tk.LEFT, padx=10, pady=10)
+
+stop_button = tk.Button(root, text="Stop Capture", command=stop_capture)
+stop_button.pack(side=tk.RIGHT, padx=10, pady=10)
+
+# Start the GUI loop
+root.mainloop()
