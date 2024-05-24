@@ -4,6 +4,7 @@ import os
 import mediapipe as mp
 import tkinter as tk
 from tkinter import Label
+from tkinter import ttk
 from PIL import Image, ImageTk
 from keras.models import model_from_json
 from keras.preprocessing.sequence import pad_sequences
@@ -16,16 +17,6 @@ def mediapipe_detection(image, model):
     image.flags.writeable = True                   # Image is now writeable 
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR) # COLOR COVERSION RGB 2 BGR
     return image, results
-
-def draw_styled_landmarks(image, results):
-    if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(
-                image,
-                hand_landmarks,
-                mp_hands.HAND_CONNECTIONS,
-                mp_drawing_styles.get_default_hand_landmarks_style(),
-                mp_drawing_styles.get_default_hand_connections_style())
 
 def extract_keypoints(results):
     if results.multi_hand_landmarks:
@@ -56,14 +47,31 @@ threshold = 0.8
 # Tkinter Setup
 root = tk.Tk()
 root.title("Sign Language Detection")
+root.geometry("800x600")
+root.configure(bg="#f0f0f0")
+
+# Title label
+title_label = ttk.Label(root, text="Sign Language Detection", font=("Helvetica", 24, "bold"), background="#f0f0f0")
+title_label.pack(pady=20)
+
+# Frame for video and output
+frame = ttk.Frame(root, padding=10)
+frame.pack(padx=10, pady=10)
 
 # Label to display the video feed
-video_label = Label(root)
-video_label.pack()
+video_label = Label(frame)
+video_label.grid(row=0, column=0, padx=10, pady=10)
 
 # Label to display the detected sign language
-output_label = Label(root, text="", font=("Helvetica", 24))
-output_label.pack()
+output_frame = ttk.LabelFrame(frame, text="Detected Sign", padding=10)
+output_frame.grid(row=0, column=1, padx=10, pady=10, sticky="n")
+
+output_label = Label(output_frame, text="", font=("Helvetica", 18), wraplength=200)
+output_label.pack(pady=20)
+
+# Label to display the confidence of the detected sign
+confidence_label = Label(output_frame, text="", font=("Helvetica", 14), wraplength=200)
+confidence_label.pack(pady=20)
 
 # Global variable to control video capture
 cap = None
@@ -104,17 +112,19 @@ def detect_sign_language():
                         if len(sentence) > 0: 
                             if actions[np.argmax(res)] != sentence[-1]:
                                 sentence.append(actions[np.argmax(res)])
-                                accuracy.append(str(res[np.argmax(res)] * 100))
+                                accuracy.append(f"{res[np.argmax(res)]*100:.2f}")
                         else:
                             sentence.append(actions[np.argmax(res)])
-                            accuracy.append(str(res[np.argmax(res)] * 100))
+                            accuracy.append(f"{res[np.argmax(res)]*100:.2f}")
                         
                 if len(sentence) > 1: 
                     sentence = sentence[-1:]
                     accuracy = accuracy[-1:]
                 
-                output_text = "Output: " + ' '.join(sentence) + ' ' + ''.join(accuracy) + "%"
+                output_text = f"Sign: {' '.join(sentence)}"
                 output_label.config(text=output_text)
+                confidence_text = f"Confidence: {''.join(accuracy)}%"
+                confidence_label.config(text=confidence_text)
         except Exception as e:
             pass
 
@@ -127,11 +137,14 @@ def detect_sign_language():
         video_label.after(10, detect_sign_language)
 
 # Buttons to start and stop the video capture
-start_button = tk.Button(root, text="Start Capture", command=start_capture)
-start_button.pack(side=tk.LEFT, padx=10, pady=10)
+button_frame = ttk.Frame(root, padding=10)
+button_frame.pack(pady=10)
 
-stop_button = tk.Button(root, text="Stop Capture", command=stop_capture)
-stop_button.pack(side=tk.RIGHT, padx=10, pady=10)
+start_button = ttk.Button(button_frame, text="Start Capture", command=start_capture)
+start_button.grid(row=0, column=0, padx=10, pady=10)
+
+stop_button = ttk.Button(button_frame, text="Stop Capture", command=stop_capture)
+stop_button.grid(row=0, column=1, padx=10, pady=10)
 
 # Start the GUI loop
 root.mainloop()
